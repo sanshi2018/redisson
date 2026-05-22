@@ -345,6 +345,7 @@ public class RedissonLock extends RedissonBaseLock {
 
     protected RFuture<Boolean> unlockInnerAsync(long threadId, String requestId, int timeout) {
         return evalWriteSyncedAsync(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+                              // 减少重入次数，如果重入次数为0了，删除锁，并且发布消息通知其他线程锁被释放了
                               "local val = redis.call('get', KEYS[3]); " +
                                     "if val ~= false then " +
                                         "return tonumber(val);" +
@@ -364,6 +365,14 @@ public class RedissonLock extends RedissonBaseLock {
                                         "redis.call('set', KEYS[3], 1, 'px', ARGV[5]); " +
                                         "return 1; " +
                                     "end; ",
+                                // TODO 重点 KEYS[1]：锁名称,
+                                //  KEYS[2]：频道名称, pub/sub用来通知其他线程锁被释放了，
+                                //  KEYS[3]：解锁结果的key（用来通知解锁结果，0代表未成功解锁，1代表成功解锁）
+                                //  ARGV[1]：解锁消息,
+                                //  ARGV[2]：过期时间,
+                                //  ARGV[3]：serverId（uuid） + threadId,
+                                //  ARGV[4]：发布命令,
+                                //  ARGV[5]：解锁结果的过期时间
                                 Arrays.asList(getRawName(), getChannelName(), getUnlockLatchName(requestId)),
                                 LockPubSub.UNLOCK_MESSAGE, internalLockLeaseTime,
                                 getLockName(threadId), getSubscribeService().getPublishCommand(), timeout);
