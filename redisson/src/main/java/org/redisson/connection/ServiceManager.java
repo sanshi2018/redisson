@@ -239,7 +239,7 @@ public class ServiceManager {
         } else {
             minTimeout = 100;
         }
-
+        // TODO 重点 netty实现的实践轮，借助时间轮进行续约
         timer = new HashedWheelTimer(new DefaultThreadFactory("redisson-timer"), minTimeout, TimeUnit.MILLISECONDS, 1024, false);
 
         connectionWatcher = new IdleConnectionWatcher(group, config);

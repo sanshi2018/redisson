@@ -102,17 +102,21 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
     }
 
     private static final Logger log = LoggerFactory.getLogger(RedissonBaseLock.class);
-
+    // TODO 重点 serverId+lockName  TO ExpirationEntry
     private static final ConcurrentMap<String, ExpirationEntry> EXPIRATION_RENEWAL_MAP = new ConcurrentHashMap<>();
     protected long internalLockLeaseTime;
 
+    // TODO 重点 表明一个客户端的uuid
     final String id;
     final String entryName;
 
     public RedissonBaseLock(CommandAsyncExecutor commandExecutor, String name) {
         super(commandExecutor, name);
+        // TODO 重点 表明一个客户端的uuid
         this.id = getServiceManager().getId();
+        // TODO 重点 默认30s
         this.internalLockLeaseTime = getServiceManager().getCfg().getLockWatchdogTimeout();
+        // TODO 重点 serverId+lockName
         this.entryName = id + ":" + name;
     }
 
@@ -131,6 +135,7 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
         }
         
         Timeout task = getServiceManager().newTimeout(new TimerTask() {
+            // TODO 重点 讲续期任务委托给netty的HashedWheelTimer 的timer去执行
             @Override
             public void run(Timeout timeout) throws Exception {
                 ExpirationEntry ent = EXPIRATION_RENEWAL_MAP.get(getEntryName());
@@ -152,12 +157,15 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
                     
                     if (res) {
                         // reschedule itself
+                        // TODO 重点 续期成功了，继续续期
                         renewExpiration();
                     } else {
+                        // TODO 重点 续期失败了，说明锁已经过期了，取消续期任务
                         cancelExpirationRenewal(null);
                     }
                 });
             }
+            // TODO 重点 时间轮续期任务的执行周期是 internalLockLeaseTime / 3，默认10s
         }, internalLockLeaseTime / 3, TimeUnit.MILLISECONDS);
         
         ee.setTimeout(task);
@@ -167,10 +175,13 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
         ExpirationEntry entry = new ExpirationEntry();
         ExpirationEntry oldEntry = EXPIRATION_RENEWAL_MAP.putIfAbsent(getEntryName(), entry);
         if (oldEntry != null) {
+            // TODO 重点 以前已经加过锁了
             oldEntry.addThreadId(threadId);
         } else {
+            // TODO 重点 以前没有加过锁，第一次加锁了
             entry.addThreadId(threadId);
             try {
+                // TODO 重点 续约逻辑
                 renewExpiration();
             } finally {
                 if (Thread.currentThread().isInterrupted()) {
@@ -182,6 +193,7 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
 
     protected CompletionStage<Boolean> renewExpirationAsync(long threadId) {
         return evalWriteSyncedAsync(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+                // TODO 重点 当前线程持有对于的key，就进行续期
                 "if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then " +
                         "redis.call('pexpire', KEYS[1], ARGV[1]); " +
                         "return 1; " +
@@ -198,14 +210,17 @@ public abstract class RedissonBaseLock extends RedissonExpirable implements RLoc
         }
         
         if (threadId != null) {
+            // TODO 重点 取消当前线程的续约逻辑
             task.removeThreadId(threadId);
         }
 
         if (threadId == null || task.hasNoThreads()) {
+            // TODO 重点 entry已经没有线程了，取消续约
             Timeout timeout = task.getTimeout();
             if (timeout != null) {
                 timeout.cancel();
             }
+            // TODO 重点 取消续约逻辑
             EXPIRATION_RENEWAL_MAP.remove(getEntryName());
         }
     }

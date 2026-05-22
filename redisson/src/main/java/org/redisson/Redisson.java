@@ -68,6 +68,7 @@ public final class Redisson implements RedissonClient {
         this.config = config;
         Config configCopy = new Config(config);
 
+        // TODO 重点 建立与redis-server的连接
         connectionManager = ConfigSupport.createConnectionManager(configCopy);
         RedissonObjectBuilder objectBuilder = null;
         if (config.isReferenceEnabled()) {

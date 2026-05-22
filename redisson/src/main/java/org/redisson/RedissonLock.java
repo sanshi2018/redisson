@@ -100,6 +100,7 @@ public class RedissonLock extends RedissonBaseLock {
     }
 
     private void lock(long leaseTime, TimeUnit unit, boolean interruptibly) throws InterruptedException {
+        // TODO 重点 加锁时拿到线程id
         long threadId = Thread.currentThread().getId();
         Long ttl = tryAcquire(-1, leaseTime, unit, threadId);
         // lock acquired
@@ -186,6 +187,7 @@ public class RedissonLock extends RedissonBaseLock {
         if (leaseTime > 0) {
             ttlRemainingFuture = tryLockInnerAsync(waitTime, leaseTime, unit, threadId, RedisCommands.EVAL_LONG);
         } else {
+            // TODO 重点 走默认30s过期
             ttlRemainingFuture = tryLockInnerAsync(waitTime, internalLockLeaseTime,
                     TimeUnit.MILLISECONDS, threadId, RedisCommands.EVAL_LONG);
         }
@@ -194,10 +196,13 @@ public class RedissonLock extends RedissonBaseLock {
 
         CompletionStage<Long> f = ttlRemainingFuture.thenApply(ttlRemaining -> {
             // lock acquired
+            // TODO 重点 == null 代表加锁成功，否则返回锁的剩余过期时间
             if (ttlRemaining == null) {
                 if (leaseTime > 0) {
+                    // TODO 重点 过期时间改为业务方自己的，希望key到点过期，不希望redis续期
                     internalLockLeaseTime = unit.toMillis(leaseTime);
                 } else {
+                    // TODO 重点 watchdog续期逻辑
                     scheduleExpirationRenewal(threadId);
                 }
             }
@@ -212,7 +217,10 @@ public class RedissonLock extends RedissonBaseLock {
     }
 
     <T> RFuture<T> tryLockInnerAsync(long waitTime, long leaseTime, TimeUnit unit, long threadId, RedisStrictCommand<T> command) {
+        // TODO 重点 加锁的lua脚本
         return evalWriteSyncedAsync(getRawName(), LongCodec.INSTANCE, command,
+                // TODO 重点 如果锁不存在 or 持有锁的是当前线程，那么进行重入计数并且续期
+                // 否则：返回锁的过期时间
                 "if ((redis.call('exists', KEYS[1]) == 0) " +
                             "or (redis.call('hexists', KEYS[1], ARGV[2]) == 1)) then " +
                         "redis.call('hincrby', KEYS[1], ARGV[2], 1); " +
@@ -220,6 +228,7 @@ public class RedissonLock extends RedissonBaseLock {
                         "return nil; " +
                     "end; " +
                     "return redis.call('pttl', KEYS[1]);",
+                // TODO 重点 KEYS[1]:锁名称, ARGV[1]：过期时间, ARGV[2]：serverId（uuid） + threadId
                 Collections.singletonList(getRawName()), unit.toMillis(leaseTime), getLockName(threadId));
     }
 
