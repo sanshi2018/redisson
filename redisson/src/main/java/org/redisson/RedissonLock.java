@@ -107,7 +107,7 @@ public class RedissonLock extends RedissonBaseLock {
         if (ttl == null) {
             return;
         }
-
+        // TODO 重点 没有拿到锁，订阅频道等待锁被释放了的消息
         CompletableFuture<RedissonLockEntry> future = subscribe(threadId);
         pubSub.timeout(future);
         RedissonLockEntry entry;
@@ -128,6 +128,9 @@ public class RedissonLock extends RedissonBaseLock {
                 // waiting for message
                 if (ttl >= 0) {
                     try {
+                        // TODO 重点 RedissonLockEntry的信号量默认设置为0
+                        // 此时tryAcquire 100%会失败
+                        // 为了杜绝无意义的自旋，这里选择等待ttl
                         entry.getLatch().tryAcquire(ttl, TimeUnit.MILLISECONDS);
                     } catch (InterruptedException e) {
                         if (interruptibly) {
@@ -144,6 +147,7 @@ public class RedissonLock extends RedissonBaseLock {
                 }
             }
         } finally {
+            // TODO 重点 无论如何都要取消订阅，避免死订阅
             unsubscribe(entry, threadId);
         }
 //        get(lockAsync(leaseTime, unit));
@@ -232,6 +236,14 @@ public class RedissonLock extends RedissonBaseLock {
                 Collections.singletonList(getRawName()), unit.toMillis(leaseTime), getLockName(threadId));
     }
 
+    /**
+     * 在规定的时间内，循环的获取锁，只要还没到时间就一直尝试
+     * @param waitTime the maximum time to acquire the lock
+     * @param leaseTime lease time
+     * @param unit time unit
+     * @return
+     * @throws InterruptedException
+     */
     @Override
     public boolean tryLock(long waitTime, long leaseTime, TimeUnit unit) throws InterruptedException {
         long time = unit.toMillis(waitTime);
@@ -245,11 +257,13 @@ public class RedissonLock extends RedissonBaseLock {
         
         time -= System.currentTimeMillis() - current;
         if (time <= 0) {
+            // TODO 重点 边界条件处理，获取锁的时间是否已经超过了等待时间
             acquireFailed(waitTime, unit, threadId);
             return false;
         }
         
         current = System.currentTimeMillis();
+        // TODO 重点 订阅一把解锁通知
         CompletableFuture<RedissonLockEntry> subscribeFuture = subscribe(threadId);
         try {
             subscribeFuture.get(time, TimeUnit.MILLISECONDS);
