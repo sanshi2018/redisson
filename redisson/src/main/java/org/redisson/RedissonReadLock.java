@@ -62,6 +62,7 @@ public class RedissonReadLock extends RedissonLock implements RLock {
                                         // 添加读锁8
                                   "redis.call('hset', KEYS[1], 'mode', 'read'); " +
                                         // 给当前线程加锁，如果是读锁，会给所有线程都添加重入次数，如果是写锁，只会记一个线程的重入次数
+                                        // 这里只关注线程，不关心是读锁，写锁
                                   "redis.call('hset', KEYS[1], ARGV[2], 1); " +
                                         // 读写超时锁拼接上1
                                   "redis.call('set', KEYS[2] .. ':1', 1); " +

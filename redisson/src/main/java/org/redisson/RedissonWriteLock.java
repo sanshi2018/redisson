@@ -57,20 +57,29 @@ public class RedissonWriteLock extends RedissonLock implements RLock {
         return commandExecutor.syncedEval(getRawName(), LongCodec.INSTANCE, command,
                             "local mode = redis.call('hget', KEYS[1], 'mode'); " +
                             "if (mode == false) then " +
+                                    // 加写锁
                                   "redis.call('hset', KEYS[1], 'mode', 'write'); " +
+                                    // 设置当前线程持有锁,
+                                    // 写锁要关注写锁，隔壁读锁通过同样的ARGV[2]来判断是否是当前线程持有锁
                                   "redis.call('hset', KEYS[1], ARGV[2], 1); " +
+                                    // 过期时间
                                   "redis.call('pexpire', KEYS[1], ARGV[1]); " +
                                   "return nil; " +
                               "end; " +
                               "if (mode == 'write') then " +
                                   "if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then " +
+                                    // 重入++
                                       "redis.call('hincrby', KEYS[1], ARGV[2], 1); " + 
                                       "local currentExpire = redis.call('pttl', KEYS[1]); " +
+                                    // 累计过期时间
                                       "redis.call('pexpire', KEYS[1], currentExpire + ARGV[1]); " +
                                       "return nil; " +
                                   "end; " +
                                 "end;" +
                                 "return redis.call('pttl', KEYS[1]);",
+                        // KEYS[1] - lock key
+                        // ARGV[1] - lease time
+                        // ARGV[2] - UUID:ThreadId:write
                         Arrays.<Object>asList(getRawName()),
                         unit.toMillis(leaseTime), getLockName(threadId));
     }
