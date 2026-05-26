@@ -56,25 +56,41 @@ public class RedissonReadLock extends RedissonLock implements RLock {
     @Override
     <T> RFuture<T> tryLockInnerAsync(long waitTime, long leaseTime, TimeUnit unit, long threadId, RedisStrictCommand<T> command) {
         return commandExecutor.syncedEval(getRawName(), LongCodec.INSTANCE, command,
+                                // 获取当前这把锁的mode值
                                 "local mode = redis.call('hget', KEYS[1], 'mode'); " +
                                 "if (mode == false) then " +
+                                        // 添加读锁8
                                   "redis.call('hset', KEYS[1], 'mode', 'read'); " +
+                                        // 给当前线程加锁，如果是读锁，会给所有线程都添加重入次数，如果是写锁，只会记一个线程的重入次数
                                   "redis.call('hset', KEYS[1], ARGV[2], 1); " +
+                                        // 读写超时锁拼接上1
                                   "redis.call('set', KEYS[2] .. ':1', 1); " +
+                                        // 读写超时锁设置过期时间
                                   "redis.call('pexpire', KEYS[2] .. ':1', ARGV[1]); " +
                                   "redis.call('pexpire', KEYS[1], ARGV[1]); " +
                                   "return nil; " +
                                 "end; " +
+
+                                        // 如果是读锁 OR 是写锁 + 是当前进程
                                 "if (mode == 'read') or (mode == 'write' and redis.call('hexists', KEYS[1], ARGV[3]) == 1) then " +
-                                  "local ind = redis.call('hincrby', KEYS[1], ARGV[2], 1); " + 
+                                        // 重入++ ，如果是读锁，会给所有线程都添加重入次数，如果是写锁，只会记一个线程的重入次数
+                                  "local ind = redis.call('hincrby', KEYS[1], ARGV[2], 1); " +
+                                        // 读写超时锁拼上重入次数【ind】
                                   "local key = KEYS[2] .. ':' .. ind;" +
                                   "redis.call('set', key, 1); " +
                                   "redis.call('pexpire', key, ARGV[1]); " +
+                                        // 锁剩余时间
                                   "local remainTime = redis.call('pttl', KEYS[1]); " +
+                                        // 重新设置ttl
                                   "redis.call('pexpire', KEYS[1], math.max(remainTime, ARGV[1])); " +
                                   "return nil; " +
                                 "end;" +
                                 "return redis.call('pttl', KEYS[1]);",
+                        // KEY[1] - lock name
+                        // KEY[2] - {lock name}:threadId:rwlock_timeout
+                        // ARGV[1] - 锁过期时间
+                        // ARGV[2] - UUID:threadId
+                        // ARGV[3] - UUID:threadId:write
                         Arrays.<Object>asList(getRawName(), getReadWriteTimeoutNamePrefix(threadId)),
                         unit.toMillis(leaseTime), getLockName(threadId), getWriteLockName(threadId));
     }
